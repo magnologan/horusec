@@ -159,30 +159,40 @@ func (a *Analyzer) formatAnalysisToSendToAPI() {
 	}
 }
 
-// nolint:gocyclo
-func (a *Analyzer) checkIfNoExistHashAndLog(list []string) {
-	for _, hash := range list {
-		existing := false
-		for idx := range a.analysis.AnalysisVulnerabilities {
-			vulnHash := a.analysis.AnalysisVulnerabilities[idx].Vulnerability.VulnHash
-			vulnHashInvalid := a.analysis.AnalysisVulnerabilities[idx].Vulnerability.VulnHashInvalid
-			if hash == vulnHash || hash == vulnHashInvalid {
-				existing = true
+// logWarnIfHashDontExists logs a warning if the one of the config hashes don't exist in the analysis.
+func (a *Analyzer) logWarnIfHashDontExists(configHashes []string) {
+	for _, configHash := range configHashes {
+		isDontExists := true
+
+		for _, vuln := range a.analysis.AnalysisVulnerabilities {
+			if a.contains(configHash, append(vuln.Vulnerability.OldHashes, vuln.Vulnerability.VulnHash)) {
+				isDontExists = false
 				break
 			}
 		}
-		if !existing {
-			logger.LogWarnWithLevel(messages.MsgWarnHashNotExistOnAnalysis + hash)
+
+		if isDontExists {
+			logger.LogWarnWithLevel(messages.MsgWarnHashNotExistOnAnalysis + configHash)
 		}
 	}
+}
+
+func (a *Analyzer) contains(hash string, hashes []string) bool {
+	for _, v := range hashes {
+		if hash == v {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (a *Analyzer) setFalsePositive() *analysis.Analysis {
 	a.analysis = a.SetFalsePositivesAndRiskAcceptInVulnerabilities(
 		a.config.FalsePositiveHashes, a.config.RiskAcceptHashes)
 
-	a.checkIfNoExistHashAndLog(a.config.FalsePositiveHashes)
-	a.checkIfNoExistHashAndLog(a.config.RiskAcceptHashes)
+	a.logWarnIfHashDontExists(append(a.config.FalsePositiveHashes, a.config.RiskAcceptHashes...))
+
 	return a.analysis
 }
 
@@ -218,9 +228,13 @@ func (a *Analyzer) setVulnerabilityType(
 ) {
 	for _, hash := range hashes {
 		hash = strings.TrimSpace(hash)
-		// See vulnerability.Vulnerability.VulnHashInvalid docs for more info.
-		if hash != "" && (strings.TrimSpace(vuln.VulnHash) == hash || strings.TrimSpace(vuln.VulnHashInvalid) == hash) {
-			vuln.Type = vulnType
+
+		// See vulnerability.Vulnerability.OldHashes docs for more info.
+		for _, oldHash := range vuln.OldHashes {
+			if hash != "" && (strings.TrimSpace(vuln.VulnHash) == hash || strings.TrimSpace(oldHash) == hash) {
+				vuln.Type = vulnType
+				return
+			}
 		}
 	}
 }
